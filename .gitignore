@@ -1,0 +1,60 @@
+# API keys and secrets — NEVER commit these
+.env
+*.env
+.env.local
+.env.production
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Poetry
+.venv/
+
+# Database and vector store data
+chroma_data/
+postgres_data/
+redis_data/
+
+# ML model cache (large files, download automatically)
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+models/
+
+# HuggingFace cache
+.cache/
+
+# Test and coverage output
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# Logs
+*.log
+logs/
+
+# Node modules (dashboard)
+dashboard/node_modules/
+dashboard/build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
