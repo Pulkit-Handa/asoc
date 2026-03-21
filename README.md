@@ -119,4 +119,4 @@ Every confirmed false negative automatically generates a Lesson Learned:
 
 ## License
 
-Internal — Classification: CONFIDENTIAL
+MIT 
