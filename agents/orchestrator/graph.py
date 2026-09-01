@@ -8,7 +8,6 @@ Defines the full multi-agent state machine:
 """
 import logging
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.redis import AsyncRedisSaver
 
 from agents.orchestrator.state import SOCState
 from agents.triage.agent import triage_node
