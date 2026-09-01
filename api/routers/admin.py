@@ -12,13 +12,12 @@ GET  /admin/circuit-breakers   — current state of all circuit breakers
 POST /admin/circuit-breakers/{service}/reset — manually reset an open breaker
 GET  /admin/audit-logs         — compliance audit trail (paginated)
 """
+
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import desc, select, text
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from api.routers.auth import UserRole, require_role
@@ -33,28 +32,33 @@ _require_admin = require_role(UserRole.ADMIN)
 
 # ── DLQ ───────────────────────────────────────────────────────────────────────
 
+
 @router.get("/dlq")
 def list_dlq(
     limit: int = Query(50, le=200),
-    db:    Session = Depends(get_db),
+    db: Session = Depends(get_db),
     _: dict = Depends(_require_admin),
 ):
     """List incidents that failed processing and landed in the DLQ."""
     from data.postgres.models import Incident
 
-    rows = db.execute(
-        select(Incident)
-        .where(Incident.threat_category == "PROCESSING_FAILED")
-        .order_by(desc(Incident.created_at))
-        .limit(limit)
-    ).scalars().all()
+    rows = (
+        db.execute(
+            select(Incident)
+            .where(Incident.threat_category == "PROCESSING_FAILED")
+            .order_by(desc(Incident.created_at))
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
 
     return [
         {
-            "alert_id":          r.alert_id,
+            "alert_id": r.alert_id,
             "escalation_reason": r.escalation_reason,
-            "created_at":        r.created_at.isoformat() if r.created_at else None,
-            "status":            r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "status": r.status,
         }
         for r in rows
     ]
@@ -63,32 +67,40 @@ def list_dlq(
 @router.post("/dlq/{alert_id}/replay", status_code=202)
 async def replay_dlq_alert(
     alert_id: str,
-    db:       Session = Depends(get_db),
+    db: Session = Depends(get_db),
     user: dict = Depends(_require_admin),
 ):
     """
     Reprocess a failed alert. Sends it back through the full LangGraph pipeline.
     The incident record is reset so the new result overwrites the PROCESSING_FAILED stub.
     """
-    from data.postgres.models import Incident, IncidentStatus
     from data.kafka.producer import publish_alert
+    from data.postgres.models import Incident, IncidentStatus
 
     row = db.execute(
         select(Incident).where(Incident.alert_id == alert_id)
     ).scalar_one_or_none()
 
     if not row:
-        raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found in DLQ")
+        raise HTTPException(
+            status_code=404, detail=f"Alert {alert_id} not found in DLQ"
+        )
 
     # Reset the stub
-    row.threat_category  = "REPLAYING"
-    row.status           = IncidentStatus.OPEN
-    row.escalation_reason = f"Replayed by {user['username']} at {datetime.now(timezone.utc).isoformat()}"
+    row.threat_category = "REPLAYING"
+    row.status = IncidentStatus.OPEN
+    row.escalation_reason = (
+        f"Replayed by {user['username']} at {datetime.now(UTC).isoformat()}"
+    )
     db.commit()
 
     # Republish to Kafka for reprocessing
     publish_alert(
-        alert={"alert_id": alert_id, "log": f"REPLAY: {row.escalation_reason}", "format": "raw"},
+        alert={
+            "alert_id": alert_id,
+            "log": f"REPLAY: {row.escalation_reason}",
+            "format": "raw",
+        },
         key=alert_id,
     )
 
@@ -98,6 +110,7 @@ async def replay_dlq_alert(
 
 # ── Topology ──────────────────────────────────────────────────────────────────
 
+
 @router.post("/topology/sync")
 def trigger_topology_sync(_: dict = Depends(_require_admin)):
     """
@@ -105,14 +118,15 @@ def trigger_topology_sync(_: dict = Depends(_require_admin)):
     Normally runs as a CronJob every hour. Use this after a network change.
     """
     try:
-        from data.topology.sync import sync_topology, get_last_sync_time
+        from data.topology.sync import sync_topology
+
         nodes, edges = sync_topology()
         return {
-            "status":    "synced",
-            "nodes":     nodes,
-            "edges":     edges,
-            "source":    cfg.topology_source,
-            "synced_at": datetime.now(timezone.utc).isoformat(),
+            "status": "synced",
+            "nodes": nodes,
+            "edges": edges,
+            "source": cfg.topology_source,
+            "synced_at": datetime.now(UTC).isoformat(),
         }
     except Exception as exc:
         logger.error("Topology sync failed: %s", exc, exc_info=True)
@@ -127,16 +141,14 @@ def topology_status(_: dict = Depends(_require_admin)):
         from data.topology.sync import get_last_sync_time
 
         G = load_topology()
-        crown_jewels = [
-            n for n, d in G.nodes(data=True) if d.get("crown_jewel")
-        ]
+        crown_jewels = [n for n, d in G.nodes(data=True) if d.get("crown_jewel")]
 
         return {
-            "nodes":         G.number_of_nodes(),
-            "edges":         G.number_of_edges(),
-            "crown_jewels":  len(crown_jewels),
-            "source":        cfg.topology_source,
-            "last_sync":     get_last_sync_time() or "never",
+            "nodes": G.number_of_nodes(),
+            "edges": G.number_of_edges(),
+            "crown_jewels": len(crown_jewels),
+            "source": cfg.topology_source,
+            "last_sync": get_last_sync_time() or "never",
             "sync_interval": cfg.topology_sync_interval_sec,
         }
     except Exception as exc:
@@ -145,6 +157,7 @@ def topology_status(_: dict = Depends(_require_admin)):
 
 # ── Circuit Breakers ──────────────────────────────────────────────────────────
 
+
 @router.get("/circuit-breakers")
 def list_circuit_breakers(_: dict = Depends(_require_admin)):
     """
@@ -152,6 +165,7 @@ def list_circuit_breakers(_: dict = Depends(_require_admin)):
     OPEN means that service is unreachable — investigate immediately.
     """
     from agents.shared.resilience import get_all_breaker_status
+
     return get_all_breaker_status()
 
 
@@ -164,13 +178,15 @@ def reset_circuit_breaker(
     Manually reset a circuit breaker to CLOSED.
     Only do this after confirming the service has recovered.
     """
-    from agents.shared.resilience import _breakers, BreakerState
+    from agents.shared.resilience import BreakerState, _breakers
 
     breaker = _breakers.get(service)
     if not breaker:
-        raise HTTPException(status_code=404, detail=f"No breaker for service: {service!r}")
+        raise HTTPException(
+            status_code=404, detail=f"No breaker for service: {service!r}"
+        )
 
-    breaker._state         = BreakerState.CLOSED
+    breaker._state = BreakerState.CLOSED
     breaker._failure_count = 0
     breaker._success_count = 0
 
@@ -180,13 +196,14 @@ def reset_circuit_breaker(
 
 # ── Audit Logs ────────────────────────────────────────────────────────────────
 
+
 @router.get("/audit-logs")
 def list_audit_logs(
-    user_id: Optional[str] = Query(None),
-    action:  Optional[str] = Query(None),
-    limit:   int = Query(100, le=1000),
-    offset:  int = Query(0),
-    db:      Session = Depends(get_db),
+    user_id: str | None = Query(None),
+    action: str | None = Query(None),
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0),
+    db: Session = Depends(get_db),
     _: dict = Depends(_require_admin),
 ):
     """
@@ -206,15 +223,15 @@ def list_audit_logs(
 
     return [
         {
-            "id":             r.id,
-            "user_id":        r.user_id,
-            "action":         r.action,
-            "resource":       r.resource,
-            "client_ip":      r.client_ip,
-            "status_code":    r.status_code,
-            "response_ms":    r.response_ms,
+            "id": r.id,
+            "user_id": r.user_id,
+            "action": r.action,
+            "resource": r.resource,
+            "client_ip": r.client_ip,
+            "status_code": r.status_code,
+            "response_ms": r.response_ms,
             "correlation_id": r.correlation_id,
-            "created_at":     r.created_at.isoformat() if r.created_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows
     ]
