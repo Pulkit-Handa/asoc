@@ -42,11 +42,15 @@ def backfill(days: int = 365):
     logger.info("Backfilling %d lessons from PostgreSQL → ChromaDB...", len(rows))
     success = 0
 
+    # Bulk query to avoid N+1 problem
+    all_lesson_ids = [row.lesson_id for row in rows]
+    existing = collection.get(ids=all_lesson_ids)
+    existing_ids = set(existing.get("ids", []))
+
     for row in rows:
         try:
             # Skip if already exists
-            existing = collection.get(ids=[row.lesson_id])
-            if existing["ids"]:
+            if row.lesson_id in existing_ids:
                 continue
 
             collection.add(
