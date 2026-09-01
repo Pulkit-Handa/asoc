@@ -125,6 +125,67 @@ class TestBlastRadius:
         assert exposure == 1.0
 
 
+# ── Decision Logic ────────────────────────────────────────────────────────────
+
+class TestDecisionNode:
+    """Tests for the decision matrix in the orchestrator."""
+
+    @patch("agents.orchestrator.nodes._persist_incident")
+    def test_exposure_hard_override_escalate(self, mock_persist):
+        import agents.orchestrator.nodes
+        from agents.orchestrator.nodes import decision_node
+        state = {
+            "alert_id": "test-1",
+            "exposure_score": 0.45,
+            "severity_score": 0.10,
+            "confidence_score": 0.10
+        }
+        result = decision_node(state)
+        assert result["decision"] == "ESCALATE"
+        mock_persist.assert_called_once_with(state, "ESCALATE")
+
+    @patch("agents.orchestrator.nodes._persist_incident")
+    def test_severity_threshold_escalate(self, mock_persist):
+        import agents.orchestrator.nodes
+        from agents.orchestrator.nodes import decision_node
+        state = {
+            "alert_id": "test-2",
+            "exposure_score": 0.10,
+            "severity_score": 0.85,
+            "confidence_score": 0.50
+        }
+        result = decision_node(state)
+        assert result["decision"] == "ESCALATE"
+        mock_persist.assert_called_once_with(state, "ESCALATE")
+
+    @patch("agents.orchestrator.nodes._persist_incident")
+    def test_high_confidence_low_severity_auto_close(self, mock_persist):
+        import agents.orchestrator.nodes
+        from agents.orchestrator.nodes import decision_node
+        state = {
+            "alert_id": "test-3",
+            "exposure_score": 0.10,
+            "severity_score": 0.35,
+            "confidence_score": 0.95
+        }
+        result = decision_node(state)
+        assert result["decision"] == "AUTO_CLOSE"
+        mock_persist.assert_called_once_with(state, "AUTO_CLOSE")
+
+    @patch("agents.orchestrator.nodes._persist_incident")
+    def test_otherwise_monitor(self, mock_persist):
+        import agents.orchestrator.nodes
+        from agents.orchestrator.nodes import decision_node
+        state = {
+            "alert_id": "test-4",
+            "exposure_score": 0.10,
+            "severity_score": 0.50,
+            "confidence_score": 0.50
+        }
+        result = decision_node(state)
+        assert result["decision"] == "MONITOR"
+        mock_persist.assert_called_once_with(state, "MONITOR")
+
 # ── Resilience module ─────────────────────────────────────────────────────────
 
 class TestResilience:
