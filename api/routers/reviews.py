@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.routers.auth import UserRole, get_current_user, require_role
+from api.routers.auth import UserRole, require_role
 from config.settings import cfg
 from data.postgres.models import LessonReview, LessonReviewStatus
 from data.postgres.session import get_db
