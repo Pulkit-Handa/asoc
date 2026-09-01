@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from agents.orchestrator.state import SOCState
@@ -159,22 +160,24 @@ async def _run_pipeline(alert_id: str, initial_state: SOCState, submitted_by: st
         values = final_state.values if hasattr(final_state, "values") else {}
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
-        # Persist to PostgreSQL
-        with get_session() as session:
-            session.merge(Incident(
-                alert_id=alert_id,
-                threat_category=values.get("threat_category", "UNKNOWN"),
-                severity_score=values.get("severity_score", 0.0),
-                confidence_score=values.get("confidence_score", 0.0),
-                blast_radius=values.get("blast_radius", 0),
-                exposure_score=values.get("exposure_score", 0.0),
-                decision=values.get("decision", "MONITOR"),
-                mitre_techniques=",".join(values.get("mitre_techniques", [])),
-                escalation_reason=values.get("escalation_reason"),
-                processing_time_ms=elapsed_ms,
-                src_ip=values.get("src_ip"),
-                host_id=values.get("host_id"),
-            ))
+        # Persist to PostgreSQL (optimized to not block event loop)
+        def _persist():
+            with get_session() as session:
+                session.merge(Incident(
+                    alert_id=alert_id,
+                    threat_category=values.get("threat_category", "UNKNOWN"),
+                    severity_score=values.get("severity_score", 0.0),
+                    confidence_score=values.get("confidence_score", 0.0),
+                    blast_radius=values.get("blast_radius", 0),
+                    exposure_score=values.get("exposure_score", 0.0),
+                    decision=values.get("decision", "MONITOR"),
+                    mitre_techniques=",".join(values.get("mitre_techniques", [])),
+                    escalation_reason=values.get("escalation_reason"),
+                    processing_time_ms=elapsed_ms,
+                    src_ip=values.get("src_ip"),
+                    host_id=values.get("host_id"),
+                ))
+        await run_in_threadpool(_persist)
 
         logger.info(
             "PIPELINE COMPLETE: alert=%s decision=%s conf=%.3f exposure=%.3f ms=%d",
