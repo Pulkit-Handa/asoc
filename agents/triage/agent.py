@@ -15,7 +15,7 @@ from typing import List
 from agents.orchestrator.state import SOCState
 from agents.shared.chroma_client import get_lessons_collection
 from agents.shared.mitre import get_techniques_for_category
-from agents.shared.resilience import get_breaker, with_fallback
+from agents.shared.resilience import with_fallback
 from agents.shared.telemetry import set_alert_id
 from agents.triage.models import ClassificationResult, get_classifier
 from config.settings import cfg
