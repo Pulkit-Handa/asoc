@@ -56,7 +56,7 @@ class TestSecBERTHeuristic:
 
     def test_failed_login_benign(self):
         result = self.clf._heuristic_classify(
-            "EventID=4625 FailedLogon user=bob.jones SubStatus=0xC000006A"
+            "EventID=4625 failed login user=bob.jones SubStatus=0xC000006A"
         )
         assert result.category == "Benign"
 
