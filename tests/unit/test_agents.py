@@ -252,6 +252,48 @@ class TestNormalizers:
                 f"Event {event_id} should have high severity"
 
 
+# ── Forensics module ──────────────────────────────────────────────────────────
+
+class TestForensics:
+    """Tests for Forensics Agent utility functions."""
+
+    def test_extract_techniques_empty_graph(self):
+        import networkx as nx
+        from agents.forensics.agent import extract_techniques
+        G = nx.DiGraph()
+        assert extract_techniques(G) == []
+
+    def test_extract_techniques_no_technique_attr(self):
+        import networkx as nx
+        from agents.forensics.agent import extract_techniques
+        G = nx.DiGraph()
+        G.add_edge("192.168.1.1", "192.168.1.2", timestamp="2024-01-01T12:00:00Z")
+        G.add_edge("192.168.1.2", "192.168.1.3", event_id=4624)
+        assert extract_techniques(G) == []
+
+    def test_extract_techniques_with_duplicates(self):
+        import networkx as nx
+        from agents.forensics.agent import extract_techniques
+        G = nx.DiGraph()
+        G.add_edge("A", "B", technique="T1110")
+        G.add_edge("B", "C", technique="T1059")
+        G.add_edge("C", "D", technique="T1110") # Duplicate
+
+        techniques = extract_techniques(G)
+        assert techniques == ["T1059", "T1110"] # Sorted and unique
+
+    def test_extract_techniques_mixed_edges(self):
+        import networkx as nx
+        from agents.forensics.agent import extract_techniques
+        G = nx.DiGraph()
+        G.add_edge("A", "B", technique="T1078", user="admin")
+        G.add_edge("B", "C", timestamp="now") # No technique
+        G.add_edge("C", "D", technique="T1562.001")
+
+        techniques = extract_techniques(G)
+        assert techniques == ["T1078", "T1562.001"]
+
+
 # ── Settings validation ───────────────────────────────────────────────────────
 
 class TestSettings:
