@@ -5,7 +5,6 @@ Builds a directed kill-chain graph from correlated events in ClickHouse.
 Uses Louvain community detection to identify lateral movement clusters.
 """
 import logging
-from typing import Any, Dict
 
 import networkx as nx
 from networkx.algorithms import community as nx_community
