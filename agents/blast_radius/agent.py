@@ -14,7 +14,6 @@ import os
 from typing import List
 
 import networkx as nx
-import redis
 
 from agents.orchestrator.state import SOCState
 from agents.blast_radius.topology import load_topology, is_crown_jewel
