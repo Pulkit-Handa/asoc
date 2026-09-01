@@ -27,7 +27,7 @@ from api.middleware.audit import AuditMiddleware
 from api.middleware.auth import JWTAuthMiddleware
 from api.middleware.correlation import CorrelationMiddleware
 from api.middleware.rate_limiter import RateLimitMiddleware
-from api.routers import admin, alerts, auth, health, incidents, lessons, reviews, stream
+from api.routers import alerts, auth, health, incidents, lessons, reviews, stream
 from agents.shared.telemetry import setup_logging, setup_tracing
 from config.settings import cfg
 
