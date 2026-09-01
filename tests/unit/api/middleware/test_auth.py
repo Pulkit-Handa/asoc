@@ -1,0 +1,94 @@
+import os
+import pytest
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
+
+from api.middleware.auth import JWTAuthMiddleware, create_access_token
+
+@pytest.fixture
+def test_app():
+    app = FastAPI()
+    app.add_middleware(JWTAuthMiddleware)
+
+    @app.get("/")
+    async def root():
+        return {"msg": "public"}
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    @app.get("/docs")
+    async def docs():
+        return {"msg": "docs"}
+
+    @app.get("/protected")
+    async def protected(request: Request):
+        return {"user": getattr(request.state, "user", "unknown")}
+
+    return app
+
+
+@pytest.fixture
+def client(test_app):
+    return TestClient(test_app)
+
+
+def test_public_paths_without_auth(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+
+    response = client.get("/docs")
+    assert response.status_code == 200
+
+
+def test_protected_path_missing_auth(client):
+    response = client.get("/protected")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authorization header required"
+
+
+def test_invalid_scheme(client):
+    response = client.get("/protected", headers={"Authorization": "Basic something"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Use 'Bearer <token>' or 'ApiKey <key>'"
+
+
+def test_dev_mode_bypass(client, monkeypatch):
+    monkeypatch.setenv("ASOC_DEV_MODE", "true")
+    response = client.get("/protected")
+    assert response.status_code == 200
+    assert response.json() == {"user": "unknown"}
+
+
+def test_valid_api_key(client, monkeypatch):
+    monkeypatch.setenv("API_KEYS", "test-key-1,test-key-2")
+    # In auth.py, API_KEYS are evaluated at module load time, so we need to modify the set directly
+    from api.middleware.auth import API_KEYS
+    API_KEYS.add("test-key-1")
+
+    try:
+        response = client.get("/protected", headers={"Authorization": "ApiKey test-key-1"})
+        assert response.status_code == 200
+    finally:
+        API_KEYS.remove("test-key-1")
+
+
+def test_invalid_api_key(client):
+    response = client.get("/protected", headers={"Authorization": "ApiKey bad-key"})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid API key"
+
+
+def test_valid_bearer_token(client):
+    token = create_access_token("test_user")
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json() == {"user": "test_user"}
+
+
+def test_invalid_bearer_token(client):
+    response = client.get("/protected", headers={"Authorization": "Bearer bad_token"})
+    assert response.status_code == 401
+    assert "Invalid token" in response.json()["detail"]
