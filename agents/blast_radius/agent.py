@@ -10,7 +10,6 @@ Analogous to Value at Risk (VaR) in financial systems:
   - exposure_score = 1.0  → domain controller or DB reachable
 """
 import logging
-import os
 from typing import List
 
 import networkx as nx
