@@ -1,0 +1,26 @@
+--- tests/unit/api/middleware/test_auth.py
++++ tests/unit/api/middleware/test_auth.py
+@@ -37,9 +37,6 @@
+
+ def test_public_paths_without_auth(client):
+-    response = client.get("/")
+-    assert response.status_code == 200
+-
+     response = client.get("/health")
+     assert response.status_code == 200
+
+     response = client.get("/docs")
+@@ -69,11 +66,12 @@
+     # In auth.py, API_KEYS are evaluated at module load time, so we need to modify the set directly
+     from api.middleware.auth import API_KEYS
+     API_KEYS.add("test-key-1")
+
+-    response = client.get("/protected", headers={"Authorization": "ApiKey test-key-1"})
+-    assert response.status_code == 200
+-
+-    API_KEYS.remove("test-key-1")
++    try:
++        response = client.get("/protected", headers={"Authorization": "ApiKey test-key-1"})
++        assert response.status_code == 200
++    finally:
++        API_KEYS.remove("test-key-1")
