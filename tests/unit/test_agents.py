@@ -73,6 +73,38 @@ class TestSecBERTHeuristic:
 
 # ── Blast Radius ──────────────────────────────────────────────────────────────
 
+class TestTopology:
+    def test_build_synthetic_topology(self):
+        from agents.blast_radius.topology import _build_synthetic_topology
+        import networkx as nx
+
+        G = _build_synthetic_topology()
+
+        assert isinstance(G, nx.Graph)
+
+        expected_nodes = {"web-01", "web-02", "lb-01", "app-01", "app-02", "app-03", "db-primary", "db-replica", "dc-01"}
+        assert set(G.nodes) == expected_nodes
+
+        expected_edges = {
+            ("web-01", "lb-01"), ("web-02", "lb-01"),
+            ("lb-01", "app-01"), ("lb-01", "app-02"),
+            ("app-01", "app-02"), ("app-02", "app-03"),
+            ("app-01", "db-primary"), ("app-02", "db-primary"),
+            ("db-primary", "db-replica"), ("app-03", "dc-01")
+        }
+
+        # Convert to sets of frozensets to handle undirected edges properly
+        g_edges_set = {frozenset(e) for e in G.edges}
+        expected_edges_set = {frozenset(e) for e in expected_edges}
+        assert g_edges_set == expected_edges_set
+
+        for node in ["db-primary", "db-replica", "dc-01"]:
+            assert G.nodes[node].get("crown_jewel") is True
+
+        for node in ["web-01", "web-02", "lb-01", "app-01", "app-02", "app-03"]:
+            assert not G.nodes[node].get("crown_jewel", False)
+
+
 class TestBlastRadius:
     """Tests for BFS exposure calculation."""
 
