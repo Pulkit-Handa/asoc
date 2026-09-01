@@ -22,7 +22,7 @@ from agents.orchestrator.graph import soc_app
 from agents.orchestrator.state import SOCState
 from agents.shared.telemetry import set_alert_id, setup_logging
 from config.settings import cfg
-from data.kafka.dlq import build_retry_state, send_to_dlq, should_retry
+from data.kafka.dlq import build_retry_state, send_to_dlq
 from data.normalizers.cef_normalizer import normalize_cef
 from data.normalizers.syslog_normalizer import normalize_syslog
 from data.normalizers.windows_event import normalize_windows_event
