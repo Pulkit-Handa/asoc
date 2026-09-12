@@ -74,9 +74,7 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(64, description="Batch size for encoding many texts at once")
 
     # ── PostgreSQL ────────────────────────────────────────────────────────────
-    database_url: SecretStr = Field(
-        "postgresql+psycopg2://asoc:asoc_dev_password@localhost:5432/asoc"
-    )
+    database_url: SecretStr = Field(...)
     db_pool_size: int     = Field(10)
     db_max_overflow: int  = Field(20)
     db_pool_timeout: int  = Field(30)
