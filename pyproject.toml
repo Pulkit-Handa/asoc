@@ -1,0 +1,123 @@
+[tool.poetry]
+name        = "asoc"
+version     = "1.2.0"
+description = "Autonomous SOC — Production-Grade Self-Evolving Multi-Agent Security Platform"
+authors     = ["ASOC Engineering <eng@asoc.internal>"]
+readme      = "README.md"
+packages    = [
+  { include = "agents" }, { include = "data" },
+  { include = "api" },    { include = "ml" },
+  { include = "config" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# ── Agent Framework ───────────────────────────────────────────────────────────
+langgraph              = "^0.2"
+langchain              = "^0.3"
+langchain-core         = "^0.3"
+langchain-anthropic    = "^0.3"
+langchain-openai       = { version = "^0.2", optional = true }
+langchain-ollama       = { version = "^0.2", optional = true }
+langchain-huggingface  = { version = "^0.1", optional = true }
+
+# ── ML / NLP ─────────────────────────────────────────────────────────────────
+torch                  = "^2.3"
+transformers           = "^4.42"
+sentence-transformers  = "^3.0"
+numpy                  = "^1.26"
+scikit-learn           = "^1.5"
+
+# ── Graph algorithms ──────────────────────────────────────────────────────────
+networkx               = "^3.3"
+python-louvain         = "^0.16"
+
+# ── Data stores ───────────────────────────────────────────────────────────────
+chromadb               = "^0.5"
+clickhouse-driver      = "^0.2"
+sqlalchemy             = "^2.0"
+psycopg2-binary        = "^2.9"
+alembic                = "^1.13"
+redis                  = { version = "^5.0", extras = ["hiredis"] }  # hiredis = 10x faster parsing
+
+# ── Kafka ─────────────────────────────────────────────────────────────────────
+confluent-kafka        = "^2.4"
+fastavro               = "^1.9"
+
+# ── API ───────────────────────────────────────────────────────────────────────
+fastapi                = "^0.111"
+uvicorn                = { version = "^0.30", extras = ["standard"] }
+pydantic               = "^2.7"
+pydantic-settings      = "^2.3"           # Centralized config management
+python-jose            = { version = "^3.3", extras = ["cryptography"] }
+passlib                = { version = "^1.7", extras = ["bcrypt"] }
+python-multipart       = "^0.0.9"         # Required for OAuth2PasswordRequestForm
+prometheus-fastapi-instrumentator = "^7.0"
+
+# ── Observability ─────────────────────────────────────────────────────────────
+opentelemetry-sdk                  = { version = "^1.25", optional = true }
+opentelemetry-exporter-otlp        = { version = "^1.25", optional = true }
+opentelemetry-instrumentation-fastapi = { version = "^0.46b0", optional = true }
+sentry-sdk             = { version = "^2.0", optional = true }
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dotenv          = "^1.0"
+structlog              = "^24.2"
+tenacity               = "^8.4"
+jinja2                 = "^3.1"
+langchain-google-genai = "<3.0.0"
+
+[tool.poetry.extras]
+openai       = ["langchain-openai"]
+ollama       = ["langchain-ollama"]
+huggingface  = ["langchain-huggingface"]
+otel         = ["opentelemetry-sdk", "opentelemetry-exporter-otlp", "opentelemetry-instrumentation-fastapi"]
+sentry       = ["sentry-sdk"]
+all-llm      = ["langchain-openai", "langchain-ollama", "langchain-huggingface"]
+production   = ["langchain-openai", "opentelemetry-sdk", "opentelemetry-exporter-otlp",
+                "opentelemetry-instrumentation-fastapi", "sentry-sdk"]
+
+[tool.poetry.group.dev.dependencies]
+pytest              = "^8.2"
+pytest-asyncio      = "^0.23"
+pytest-cov          = "^5.0"
+httpx               = "^0.27"
+ruff                = "^0.4"
+mypy                = "^1.10"
+black               = "^24.4"
+pre-commit          = "^3.7"
+freezegun           = "^1.5"
+respx               = "^0.21"     # Mock httpx requests
+
+[tool.ruff]
+target-version = "py311"
+line-length    = 100
+select         = ["E", "F", "I", "N", "UP"]
+ignore         = ["E501", "N806"]
+
+[tool.mypy]
+python_version         = "3.11"
+strict                 = false
+ignore_missing_imports = true
+exclude                = ["tests/", "scripts/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths    = ["tests"]
+addopts      = "-v --tb=short --cov=. --cov-report=term-missing --cov-report=html"
+markers      = [
+  "integration: requires running Docker services",
+  "unit: fast, no external services required",
+  "load: load tests, requires k6",
+]
+
+[tool.coverage.run]
+omit = ["tests/*", "scripts/*", "*/migrations/*", "alembic/*"]
+
+[tool.coverage.report]
+fail_under = 70        # Enforce minimum 70% coverage
+
+[build-system]
+requires      = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

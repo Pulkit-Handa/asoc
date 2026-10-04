@@ -1,0 +1,214 @@
+# ASOC Quickstart — Zero to Running in 30 Minutes
+# For people who haven't used these technologies before
+
+=====================================================================
+STEP 1: Install four tools (do this once, ever)
+=====================================================================
+
+1a. Install Python 3.11
+    → Go to https://www.python.org/downloads/
+    → Download "Python 3.11.x" (not 3.12, not 3.10 — specifically 3.11)
+    → Run the installer. On Windows, CHECK "Add Python to PATH"
+    → Verify: open Terminal/Command Prompt, type: python --version
+      You should see: Python 3.11.x
+
+1b. Install Node.js 20
+    → Go to https://nodejs.org/
+    → Download the "LTS" version (currently 20.x)
+    → Run the installer with all defaults
+    → Verify: type: node --version
+      You should see: v20.x.x
+
+1c. Install Docker Desktop
+    → Go to https://www.docker.com/products/docker-desktop/
+    → Download for your operating system (Mac/Windows/Linux)
+    → Install and LAUNCH it — you need it running in the background
+    → Verify: type: docker --version
+      You should see: Docker version 25.x.x
+
+1d. Install Poetry (Python package manager)
+    → Mac/Linux: open Terminal, paste:
+      curl -sSL https://install.python-poetry.org | python3 -
+    → Windows: open PowerShell, paste:
+      (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py -
+    → Close and reopen your terminal
+    → Verify: type: poetry --version
+      You should see: Poetry (version 1.x.x)
+
+=====================================================================
+STEP 2: Get API keys (5 minutes)
+=====================================================================
+
+You need accounts at two AI companies.
+
+2a. Anthropic API key (for the Critic Agent)
+    → Go to https://console.anthropic.com/
+    → Create an account, go to "API Keys", click "Create Key"
+    → Copy the key — it starts with "sk-ant-"
+
+2b. OpenAI API key (for the embedding model)
+    → Go to https://platform.openai.com/api-keys
+    → Create an account, click "Create new secret key"
+    → Copy the key — it starts with "sk-"
+
+=====================================================================
+STEP 3: Set up the project (10 minutes)
+=====================================================================
+
+3a. Unzip the ASOC code you downloaded
+    → You should have a folder called "asoc"
+
+3b. Open your Terminal/Command Prompt and navigate to it:
+    cd path/to/asoc
+    (for example: cd Downloads/asoc)
+
+3c. Create your .env file:
+    → Mac/Linux: cp env.example .env
+    → Windows:   copy env.example .env
+    
+    Then open .env in any text editor (Notepad is fine) and:
+    - Replace "sk-ant-REPLACE_ME" with your Anthropic key
+    - Replace "sk-REPLACE_ME" with your OpenAI key
+    - Save the file
+
+3d. Install Python packages:
+    poetry install
+    (This takes 3-5 minutes the first time — it downloads everything)
+
+=====================================================================
+STEP 4: Start the databases (5 minutes)
+=====================================================================
+
+Make sure Docker Desktop is running, then:
+
+    docker-compose up -d kafka postgres redis chromadb clickhouse
+
+This downloads and starts 5 services. First run takes 5-10 minutes
+to download the Docker images. You'll see a lot of text scrolling.
+
+Wait until you see everything is "healthy":
+    docker-compose ps
+
+All services should show "healthy" or "running" in the STATUS column.
+
+=====================================================================
+STEP 5: Initialize the databases (2 minutes)
+=====================================================================
+
+5a. Create the PostgreSQL tables:
+    poetry run alembic upgrade head
+
+    You should see: "Running upgrade -> 0001_initial, Initial schema"
+
+5b. Set up ClickHouse tables:
+    docker-compose exec clickhouse clickhouse-client --queries-file /docker-entrypoint-initdb.d/001_init.sql
+
+5c. Seed the network topology and baseline AI lessons:
+    poetry run python scripts/seed_topology.py
+
+    You should see checkmarks as it seeds lessons into ChromaDB.
+
+=====================================================================
+STEP 6: Start the API (always leave this running)
+=====================================================================
+
+In one terminal window, run:
+    poetry run uvicorn api.main:app --reload
+
+You should see: "Uvicorn running on http://0.0.0.0:8080"
+
+Test it's working: open http://localhost:8080/health in your browser.
+You should see: {"status": "ok", ...}
+
+The full API documentation is at: http://localhost:8080/docs
+(This is a clickable, interactive page to test every endpoint)
+
+=====================================================================
+STEP 7: Start the dashboard (leave this running too)
+=====================================================================
+
+Open a NEW terminal window (keep the API running in the other one):
+
+    cd dashboard
+    npm install          ← first time only, takes 2-3 minutes
+    npm start
+
+Your browser should automatically open http://localhost:3000
+You'll see the ASOC dashboard.
+
+=====================================================================
+STEP 8: Send your first alert! (the fun part)
+=====================================================================
+
+Open a THIRD terminal window and run:
+
+    poetry run python scripts/simulate_attack.py --scenario lateral_movement
+
+This sends a realistic 4-stage lateral movement attack through the pipeline.
+
+Watch:
+  - The Terminal shows each alert being processed with confidence scores
+  - The Dashboard at http://localhost:3000 shows alerts appearing in real-time
+  - Click an alert to see the Agent Thought Stream (live AI reasoning)
+  - Go to the Lessons tab to see lessons that were stored
+
+=====================================================================
+TROUBLESHOOTING
+=====================================================================
+
+Problem: "port already in use"
+→ Something else is using port 8080 or 5432. 
+→ Stop the other service, or change the port in docker-compose.yml
+
+Problem: "connection refused" when starting API
+→ The databases aren't ready yet. Run: docker-compose ps
+→ Wait until all show "healthy", then retry.
+
+Problem: poetry command not found
+→ Close and reopen your terminal after installing Poetry.
+→ On Windows, you may need to restart your computer.
+
+Problem: dashboard shows "Network Error"
+→ Make sure the API is running (Step 6) before starting the dashboard.
+
+Problem: "No module named X"
+→ Run: poetry install  (maybe it didn't fully complete)
+
+Problem: ChromaDB errors about embeddings
+→ Your OpenAI API key may be invalid or have no credits.
+→ Check at https://platform.openai.com/usage
+
+=====================================================================
+WHAT EACH SERVICE DOES (plain English)
+=====================================================================
+
+PostgreSQL  — stores incidents, analyst feedback, lessons permanently
+Redis       — stores LangGraph "memory" (where each alert is in the pipeline)
+ClickHouse  — ultra-fast log database for the Forensics Agent's queries
+ChromaDB    — AI memory database (stores lessons as searchable vectors)
+Kafka       — message queue (like an inbox for alerts at massive scale)
+API         — the brain that coordinates everything, serves the dashboard
+Dashboard   — the web UI you look at
+
+=====================================================================
+NEXT STEPS AFTER IT'S RUNNING
+=====================================================================
+
+1. Submit analyst feedback to train the system:
+   → Click an alert in the dashboard
+   → Mark it as TRUE_POSITIVE, FALSE_POSITIVE, or FALSE_NEGATIVE
+   → This triggers the Critic Agent to store a lesson
+
+2. Check the lesson library grew:
+   → Go to the Lessons tab in the dashboard
+   → You should see new AI-generated lessons
+
+3. Run the full simulation suite:
+   poetry run python scripts/simulate_attack.py --scenario all
+
+4. Monitor metrics in Grafana:
+   → docker-compose up -d grafana prometheus
+   → Open http://localhost:3001
+   → Login: admin / asoc_admin
+
+=====================================================================

@@ -1,0 +1,386 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ASOC Kubernetes Manifests — Production
+# Apply with: kubectl apply -k infra/k8s/overlays/prod/
+# ─────────────────────────────────────────────────────────────────────────────
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: asoc
+  labels:
+    app.kubernetes.io/name: asoc
+
+---
+# ── API Deployment ────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asoc-api
+  namespace: asoc
+  labels:
+    app: asoc-api
+    version: "1.2.0"
+spec:
+  replicas: 3                       # 3 pods = N+1 redundancy
+  selector:
+    matchLabels:
+      app: asoc-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0             # Zero-downtime deploys
+  template:
+    metadata:
+      labels:
+        app: asoc-api
+        version: "1.2.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8080"
+        prometheus.io/path:   "/metrics"
+    spec:
+      serviceAccountName: asoc-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60   # Drain in-flight requests
+      containers:
+        - name: api
+          image: ghcr.io/your-org/asoc-api:1.2.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: asoc-config
+            - secretRef:
+                name: asoc-secrets
+          env:
+            - name: ASOC_ENV
+              value: "production"
+            - name: LOG_FORMAT
+              value: "json"
+          resources:
+            requests:
+              cpu:    "500m"
+              memory: "1Gi"
+            limits:
+              cpu:    "2000m"
+              memory: "4Gi"            # SecBERT needs headroom
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 3
+          startupProbe:               # Extra time for model warm-up
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            failureThreshold: 20      # 20 * 5s = 100s max startup time
+            periodSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]   # Drain before termination
+
+---
+# ── Triage Worker Deployment ──────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asoc-triage-worker
+  namespace: asoc
+  labels:
+    app: asoc-triage-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: asoc-triage-worker
+  template:
+    metadata:
+      labels:
+        app: asoc-triage-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      terminationGracePeriodSeconds: 120   # Finish in-flight alerts
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/asoc-worker:1.2.0
+          imagePullPolicy: Always
+          command: ["python", "-m", "data.kafka.consumer"]
+          envFrom:
+            - configMapRef:
+                name: asoc-config
+            - secretRef:
+                name: asoc-secrets
+          env:
+            - name: ASOC_ENV
+              value: "production"
+          resources:
+            requests:
+              cpu:    "1000m"
+              memory: "2Gi"
+            limits:
+              cpu:    "4000m"
+              memory: "8Gi"
+
+---
+# ── Topology Sync CronJob ─────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: asoc-topology-sync
+  namespace: asoc
+spec:
+  schedule: "0 * * * *"             # Every hour
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: sync
+              image: ghcr.io/your-org/asoc-worker:1.2.0
+              command:
+                - python
+                - -c
+                - "from data.topology.sync import sync_topology; n,e=sync_topology(); print(f'Synced: {n} nodes, {e} edges')"
+              envFrom:
+                - configMapRef:
+                    name: asoc-config
+                - secretRef:
+                    name: asoc-secrets
+
+---
+# ── Expired Token Cleanup CronJob ─────────────────────────────────────────────
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: asoc-token-cleanup
+  namespace: asoc
+spec:
+  schedule: "0 2 * * *"            # 2am daily
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: cleanup
+              image: ghcr.io/your-org/asoc-worker:1.2.0
+              command:
+                - python
+                - -c
+                - |
+                  from datetime import datetime, timezone
+                  from data.postgres.session import get_session
+                  from data.postgres.models import RefreshToken
+                  from sqlalchemy import delete
+                  with get_session() as s:
+                      result = s.execute(
+                          delete(RefreshToken).where(
+                              RefreshToken.expires_at < datetime.now(timezone.utc)
+                          )
+                      )
+                      print(f"Deleted {result.rowcount} expired tokens")
+              envFrom:
+                - configMapRef:
+                    name: asoc-config
+                - secretRef:
+                    name: asoc-secrets
+
+---
+# ── API Service ───────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: asoc-api
+  namespace: asoc
+  labels:
+    app: asoc-api
+spec:
+  selector:
+    app: asoc-api
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http
+  type: ClusterIP
+
+---
+# ── Horizontal Pod Autoscaler (API) ──────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: asoc-api-hpa
+  namespace: asoc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: asoc-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type:          Pods
+          value:         3
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 5 min before scaling down
+
+---
+# ── HPA: Triage Worker (scales on Kafka consumer lag) ─────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: asoc-worker-hpa
+  namespace: asoc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: asoc-triage-worker
+  minReplicas: 2
+  maxReplicas: 50
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: kafka_consumer_group_lag
+          selector:
+            matchLabels:
+              topic: security.raw_logs
+              group: asoc-triage-worker
+        target:
+          type:          AverageValue
+          averageValue:  "1000"          # Scale up if >1000 messages lag per pod
+
+---
+# ── ConfigMap (non-secret config) ─────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asoc-config
+  namespace: asoc
+data:
+  ASOC_ENV:               "production"
+  LOG_LEVEL:              "INFO"
+  LOG_FORMAT:             "json"
+  REDIS_HOST:             "redis-master.asoc.svc.cluster.local"
+  REDIS_PORT:             "6379"
+  CLICKHOUSE_HOST:        "clickhouse.asoc.svc.cluster.local"
+  CLICKHOUSE_PORT:        "9000"
+  CHROMADB_HOST:          "chromadb.asoc.svc.cluster.local"
+  CHROMADB_PORT:          "8000"
+  KAFKA_BOOTSTRAP:        "kafka.asoc.svc.cluster.local:9092"
+  KAFKA_CONSUMER_GROUP:   "asoc-triage-worker"
+  KAFKA_BATCH_SIZE:       "50"
+  KAFKA_MAX_RETRIES:      "3"
+  EMBEDDING_MODEL:        "BAAI/bge-small-en-v1.5"
+  EMBEDDING_DEVICE:       "cpu"
+  LLM_PROVIDER:           "anthropic"
+  ANTHROPIC_MODEL:        "claude-sonnet-4-20250514"
+  RATE_LIMIT_REQUESTS:    "5000"
+  RATE_LIMIT_WINDOW_SEC:  "60"
+  TOPOLOGY_SOURCE:        "static"
+  TOPOLOGY_SYNC_INTERVAL: "3600"
+  CORS_ORIGINS:           "https://your-soc-dashboard.company.com"
+  LESSON_REVIEW_REQUIRED: "true"
+  ASOC_DEV_MODE:          "false"
+
+---
+# ── Secret template (fill values from Vault / AWS Secrets Manager) ────────────
+# NEVER commit real values here. Use external-secrets operator or sealed-secrets.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: asoc-secrets
+  namespace: asoc
+type: Opaque
+stringData:
+  DATABASE_URL:      "postgresql+psycopg2://asoc:CHANGE_ME@postgres:5432/asoc"
+  JWT_SECRET:        "GENERATE_WITH_python_-c_import_secrets_print_secrets.token_hex_32"
+  ANTHROPIC_API_KEY: "sk-ant-REPLACE_FROM_VAULT"
+  REDIS_PASSWORD:    ""
+  API_KEYS:          "your-siem-key-here,your-soar-key-here"
+  SENTRY_DSN:        ""
+
+---
+# ── ServiceAccount + RBAC ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: asoc-api
+  namespace: asoc
+  annotations:
+    # AWS: eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/asoc-api-role
+    # GCP: iam.gke.io/gcp-service-account: asoc@PROJECT.iam.gserviceaccount.com
+
+---
+# ── Network Policy (deny all except explicit) ─────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: asoc-api-netpol
+  namespace: asoc
+spec:
+  podSelector:
+    matchLabels:
+      app: asoc-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: asoc
+    - to:   # Allow external LLM API calls
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - port: 443
